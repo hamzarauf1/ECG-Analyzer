@@ -6,11 +6,21 @@ export const maxDuration = 60; // Set max duration for the API route
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const image = formData.get("image") as File;
 
-    if (!image) {
+    // Collect all image files from the formData.
+    // Assuming the frontend sends multiple files with the same key, e.g., "images".
+    const images: File[] = [];
+    for (const [key, value] of formData.entries()) {
+      if (key === "images" && value instanceof File) {
+        images.push(value);
+      }
+    }
+
+    if (images.length === 0) {
       return NextResponse.json(
-        { message: "Image is required" },
+        {
+          message: "No images provided. Please upload one or more ECG images.",
+        },
         { status: 400 }
       );
     }
@@ -20,33 +30,42 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { message: "API key not configured" },
+        {
+          message:
+            "API key not configured. Please set GOOGLE_CLOUD_API_KEY in your environment variables.",
+        },
         { status: 500 }
       );
     }
 
-    // Convert the image to base64
-    const bytes = await image.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const base64Image = buffer.toString("base64");
+    // Prepare the parts for the Gemini API payload
+    const contentParts: any[] = [];
+
+    // Add the initial text prompt. This prompt is updated to inform the model
+    // that it might receive multiple images that together form a complete ECG strip.
+    // It also instructs the model to account for potential overlaps.
+    let promptText =
+      "This is an ECG analysis request. You will be provided with one or more images that collectively represent a continuous ECG strip. Please analyze these images in detail, considering that there might be overlaps between consecutive images. Provide a professional medical interpretation including:\n\n1. Heart rate and rhythm assessment\n2. Identification of any abnormalities\n3. P-wave, QRS complex, and T-wave analysis\n4. Potential clinical significance\n\nOrganize your response clearly with sections and bullet points where appropriate.";
+
+    contentParts.push({ text: promptText });
+
+    // Convert each image to base64 and add it to the contentParts array
+    for (const image of images) {
+      const bytes = await image.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+      const base64Image = buffer.toString("base64");
+
+      contentParts.push({
+        inline_data: {
+          mime_type: image.type,
+          data: base64Image,
+        },
+      });
+    }
 
     // Set up the payload for Gemini API
     const payload = {
-      contents: [
-        {
-          parts: [
-            {
-              text: "This is an ECG image. Please analyze it in detail. Provide a professional medical interpretation including:\n\n1. Heart rate and rhythm assessment\n2. Identification of any abnormalities\n3. P-wave, QRS complex, and T-wave analysis\n4. Potential clinical significance\n\nOrganize your response clearly with sections and bullet points where appropriate.",
-            },
-            {
-              inline_data: {
-                mime_type: image.type,
-                data: base64Image,
-              },
-            },
-          ],
-        },
-      ],
+      contents: [{ parts: contentParts }],
     };
 
     // Make the request to Gemini API
@@ -75,13 +94,30 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await geminiResponse.json();
+
+    // Check if analysis data exists before trying to access it
+    if (
+      !data.candidates ||
+      data.candidates.length === 0 ||
+      !data.candidates[0].content ||
+      !data.candidates[0].content.parts ||
+      data.candidates[0].content.parts.length === 0
+    ) {
+      return NextResponse.json(
+        { message: "Gemini API did not return a valid analysis." },
+        { status: 500 }
+      );
+    }
+
     const analysis = data.candidates[0].content.parts[0].text;
 
     return NextResponse.json({ analysis });
   } catch (error) {
     console.error("Error processing request:", error);
     return NextResponse.json(
-      { message: "Internal server error" },
+      {
+        message: "Internal server error. Please check server logs for details.",
+      },
       { status: 500 }
     );
   }
