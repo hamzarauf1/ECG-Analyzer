@@ -21,8 +21,8 @@ export type Analysis = {
 };
 
 export function ECGAnalyzer() {
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [analysis, setAnalysis] = useState<Analysis>({
     result: "",
     loading: false,
@@ -30,24 +30,31 @@ export function ECGAnalyzer() {
   });
   const [activeTab, setActiveTab] = useState<string>("upload");
 
-  const handleImageUpload = (file: File | null) => {
-    setImageFile(file);
-    if (file === null) {
-      setImagePreview(null);
+  const handleImageUpload = (files: File[]) => {
+    setImageFiles(files);
+    if (files.length === 0) {
+      setImagePreviews([]);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setImagePreview(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+
+    const newPreviews: string[] = [];
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        newPreviews.push(e.target?.result as string);
+        if (newPreviews.length === files.length) {
+          setImagePreviews(newPreviews);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleAnalyzeClick = async () => {
-    if (!imageFile) {
+    if (imageFiles.length === 0) {
       toast({
-        title: "No image selected",
-        description: "Please upload an ECG image first",
+        title: "No images selected",
+        description: "Please upload one or more ECG images first",
         variant: "destructive",
       });
       return;
@@ -57,7 +64,7 @@ export function ECGAnalyzer() {
     setActiveTab("result");
 
     try {
-      const result = await analyzeECG(imageFile);
+      const result = await analyzeECG(imageFiles);
       setAnalysis({
         result,
         loading: false,
@@ -83,14 +90,15 @@ export function ECGAnalyzer() {
       <CardHeader>
         <CardTitle className="text-2xl">ECG Analysis Tool</CardTitle>
         <CardDescription>
-          Upload an ECG image to get AI-powered analysis and interpretation
+          Upload one or more ECG images to get AI-powered analysis and
+          interpretation
         </CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="upload">Upload</TabsTrigger>
-            <TabsTrigger value="result" disabled={!imagePreview}>
+            <TabsTrigger value="result" disabled={!imagePreviews.length}>
               Analysis
             </TabsTrigger>
           </TabsList>
@@ -98,14 +106,14 @@ export function ECGAnalyzer() {
             <ImageUploader
               onImageUpload={handleImageUpload}
               onAnalyzeClick={handleAnalyzeClick}
-              imagePreview={imagePreview}
+              imagePreviews={imagePreviews}
               isLoading={analysis.loading}
             />
           </TabsContent>
           <TabsContent value="result" className="mt-4">
             <AnalysisResult
               analysis={analysis}
-              imagePreview={imagePreview}
+              imagePreviews={imagePreviews}
               onBackToUpload={() => setActiveTab("upload")}
             />
           </TabsContent>
